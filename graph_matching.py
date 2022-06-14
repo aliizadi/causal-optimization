@@ -1,3 +1,4 @@
+import cvxpy
 import numpy as np
 from data import generate_bivariate_data, generate_multivariate_data
 from sklearn.model_selection import train_test_split
@@ -13,7 +14,7 @@ np.random.seed(seed)
 
 def get_parameters():
     return {'n_samples': 5000,
-            'epochs': 100,
+            'epochs': 200,
             'test_size': 0.3,
             'print_epoch': 1,
             'direction': 'yx',
@@ -174,12 +175,16 @@ class GraphMatching:
         b = np.ones(2 * d)
 
         x = cp.Variable(n)
-        prob = cp.Problem(cp.Maximize((1 / 2) * cp.quad_form(x, Q)),
+        prob = cp.Problem(cp.Maximize(cp.quad_form(x, Q)),
                           [x >= h,
                            A @ x == b])
-        #
-        prob.solve()
-        self.P = x.value.reshape(self.dim, self.dim, order='F')
+        try:
+            prob.solve()
+            self.P = x.value.reshape(self.dim, self.dim, order='F')
+
+        except cvxpy.DCPError:
+            print('*' * 50, 'DCP error')
+            pass
 
         # closed form based on paper:
         # B = np.vstack((A_rows, A_cols))
@@ -276,8 +281,8 @@ class LinearCausalDiscovery:
         self.dim = train.shape[1]
 
         self.A = np.tril(np.random.random((self.dim, self.dim)), k=-1)
-        self.P = np.eye(self.dim)
-        # self.P = np.ones((self.dim, self.dim)) / self.dim
+        # self.P = np.eye(self.dim)
+        self.P = np.ones((self.dim, self.dim)) / self.dim
         # self.P = np.array([[0, 0, 0, 1],
         #                    [0, 0, 1, 0],
         #                    [0, 1, 0, 0],
@@ -305,18 +310,21 @@ class LinearCausalDiscovery:
         validation_losses = []
         for epoch in range(parameters['epochs']):
             least_square = LeastSquare(self.P, self.train)
-            graph_matching = GraphMatching(self.A_G, self.A_H_train, self.P)
-
             self.A = least_square.solve()
+            print('----------------- A:')
+            print(np.round(self.A, 2))
+
+            graph_matching = GraphMatching(self.A_G, self.A_H_train, self.P)
             self.P = graph_matching.optimize()
+            print('----------------- P:')
+            print(np.round(self.P, 2))
+
             # self.P = self._hungarian_algorithm(-self.P)
+            # print('----------------- P projected:')
+            # print(np.round(self.P, 2))
 
             train_loss = self.loss(data_type='train')
             validation_loss = self.loss(data_type='validation')
-            print('----------------- A:')
-            print(np.round(self.A, 2))
-            print('----------------- P:')
-            print(np.round(self.P, 2))
             if epoch % parameters['print_epoch'] == 0:
                 print('epoch: {}, train loss: {}, validation loss: {}'.format(epoch, train_loss, validation_loss))
 
