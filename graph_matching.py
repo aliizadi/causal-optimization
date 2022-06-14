@@ -178,13 +178,13 @@ class GraphMatching:
         prob = cp.Problem(cp.Maximize(cp.quad_form(x, Q)),
                           [x >= h,
                            A @ x == b])
-        try:
-            prob.solve()
-            self.P = x.value.reshape(self.dim, self.dim, order='F')
+        # try:
+        prob.solve()
+        self.P = x.value.reshape(self.dim, self.dim, order='F')
 
-        except cvxpy.DCPError:
-            print('*' * 50, 'DCP error')
-            pass
+        # except cvxpy.DCPError:
+        #     print('*' * 50, 'DCP error')
+        #     pass
 
         # closed form based on paper:
         # B = np.vstack((A_rows, A_cols))
