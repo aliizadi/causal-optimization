@@ -4,19 +4,19 @@ from data import generate_bivariate_data, generate_multivariate_data
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from scipy.sparse import csgraph
-from scipy.optimize import linear_sum_assignment
-from scipy.sparse import csr_matrix
+from utils import hungarian_algorithm
 import cvxpy as cp
 
 seed = 0
 np.random.seed(seed)
+np.set_printoptions(suppress=True)
 
 
 def get_parameters():
-    return {'n_samples': 5000,
-            'epochs': 200,
+    return {'n_samples': 7500,
+            'epochs': 10_000,
             'test_size': 0.3,
-            'print_epoch': 1,
+            'print_epoch': 50,
             'direction': 'yx',
             'causal_func': 'linear',  # in {'linear', 'non-linear'}
             'noise': 'laplace',  # in  {'gaussian', laplace, 'cauchy', 'student'}
@@ -24,9 +24,10 @@ def get_parameters():
             'lambda_A': 10e-1,  # sparsity coefficient for lower triangular adjacency matrix A
             'eta_lambda_A': 10e-1,
             'frank_wolfe_epochs': 1000,
-            'frank_wolfe_convergence': 10e-6,
+            'frank_wolfe_convergence': 10e-10,
             'd_lambda_': 0.1,
             'path_algorithm_convergence': 10e-6,
+            'main_algorithm_convergence': 10e-6
             }
 
 
@@ -110,7 +111,7 @@ class GraphMatching:
 
             d = s - self.P
 
-            g = - np.sum(np.dot(grad, d))
+            g = np.sum(np.dot(grad, d))
 
             if g <= parameters['frank_wolfe_convergence']:
                 print(f'wolfe condition satisfied at epoch: {k}')
@@ -140,15 +141,6 @@ class GraphMatching:
         grad_f1 = -self.delta.T.flatten(order='F') - 2 * (self.L_A_G.T @ self.P @ self.L_A_H).flatten(order='F')
 
         return ((1 - lambda_) * grad_f0 + lambda_ * grad_f1).reshape(self.dim, self.dim, order='f')
-
-    def _hungarian_algorithm(self, grad):
-        """
-        https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.optimize.linear_sum_assignment.html
-        """
-        row_ind, col_ind = linear_sum_assignment(grad)
-        shape = len(row_ind)
-        data = [1 for _ in range(shape)]
-        return csr_matrix((data, (row_ind, col_ind)), shape=(shape, shape)).toarray()
 
     def _qp_solver(self):
         n = self.dim * self.dim
@@ -296,32 +288,15 @@ class LinearCausalDiscovery:
         self.lambda_A = parameters['lambda_A']
         self.eta_lambda_A = parameters['eta_lambda_A']
 
-    def _hungarian_algorithm(self, grad):
-        """
-        https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.optimize.linear_sum_assignment.html
-        """
-        row_ind, col_ind = linear_sum_assignment(grad)
-        shape = len(row_ind)
-        data = [1 for _ in range(shape)]
-        return csr_matrix((data, (row_ind, col_ind)), shape=(shape, shape)).toarray()
-
     def optimize(self):
         train_losses = []
         validation_losses = []
         for epoch in range(parameters['epochs']):
-            least_square = LeastSquare(self.P, self.train)
-            self.A = least_square.solve()
-            print('----------------- A:')
-            print(np.round(self.A, 2))
 
             graph_matching = GraphMatching(self.A_G, self.A_H_train, self.P)
             self.P = graph_matching.optimize()
-            print('----------------- P:')
-            print(np.round(self.P, 2))
-
-            # self.P = self._hungarian_algorithm(-self.P)
-            # print('----------------- P projected:')
-            # print(np.round(self.P, 2))
+            least_square = LeastSquare(self.P, self.train)
+            self.A = least_square.solve()
 
             train_loss = self.loss(data_type='train')
             validation_loss = self.loss(data_type='validation')
@@ -331,6 +306,32 @@ class LinearCausalDiscovery:
             train_losses.append(train_loss)
             validation_losses.append(validation_loss)
 
+            if (epoch > 1 and abs(train_losses[-2] - train_losses[-1]) < parameters['main_algorithm_convergence']) or \
+                    epoch == parameters['epochs'] - 1:
+                print('-' * 100)
+                print(f'algorithm converged at epoch: {epoch} with training loss: {train_loss}'
+                      f' validation loss: {validation_loss}')
+                print('----------------- P:')
+                print(np.round(self.P, 2))
+                print('----------------- A:')
+                print(np.round(self.A, 2))
+
+                print('-' * 100)
+                print('projection of P to a permutation matrix and finding best A')
+                self.P = hungarian_algorithm(-self.P)
+                least_square = LeastSquare(self.P, self.train)
+                self.A = least_square.solve()
+
+                print('----------------- P:')
+                print(np.round(self.P, 2))
+                print('----------------- A:')
+                print(np.round(self.A, 2))
+
+                print(f'training loss: {self.loss(data_type="train")}'
+                      f' validation loss: {self.loss(data_type="validation")} ')
+
+                break
+
         return self.A, self.P, train_losses, validation_losses
 
     @property
@@ -339,11 +340,13 @@ class LinearCausalDiscovery:
 
     @property
     def A_H_train(self):
-        return np.cov(self.train.T)
+        # return np.cov(self.train.T)
+        return (self.train.T @ self.train) / self.train.shape[0]
 
     @property
     def A_H_validation(self):
-        return np.cov(self.validation.T)
+        # return np.cov(self.validation.T)
+        return (self.validation.T @ self.validation) / self.validation.shape[0]
 
     def loss(self, data_type='train'):
         A_G = self.A_G
@@ -370,25 +373,18 @@ def optimize():
 
     A, P, train_loss, validation_loss = linear_causal_discovery.optimize()
 
-    print('----------------- A:')
-    print(np.round(A, 2))
-    print('----------------- P:')
-    print(np.round(P, 2))
-    print('----------------- P.T @ A @ P:')
-    print(np.round(P.T @ A @ P, 2))
-
     return train_loss, validation_loss
 
 
 def plot_losses(train_loss, validation_loss):
     n_samples = parameters['n_samples']
     plt.figure()
-    plt.plot(train_loss, label='train')
-    # plt.plot(validation_loss, label='validation')
+    plt.plot(np.log(train_loss), label='train')
+    plt.plot(np.log(validation_loss), label='validation')
 
-    plt.ylabel('loss')
+    plt.ylabel('log loss')
     plt.xlabel('epoch')
-    plt.title(f'loss - \n n_samples = {n_samples}')
+    plt.title(f'log loss - n_samples = {n_samples}')
     plt.legend()
 
 
