@@ -57,9 +57,20 @@ def generate_multivariate_data(n_samples=100, direction='xy', causal_func='non-l
     X[:, 0] = N[:, 0]
     X[:, 1] = causal_func_dict[causal_func](X[:, 0], N[:, 1])
     X[:, 2] = causal_func_dict[causal_func](X[:, 0], N[:, 2])
-    # X[:, 1] = N[:, 1]
-    # X[:, 2] = N[:, 2]
-
     X[:, 3] = causal_func_dict[causal_func](X[:, 1] + X[:, 2], N[:, 3])
+
+    # new_permutation = np.random.permutation(X.shape[1])
+    #
+    # adjacency_matrix = np.zeros((dim, dim))
+    # for i, permutation in enumerate(new_permutation.tolist()):
+    #     adjacency_matrix[permutation, i] = 1
+    #
+    # print('*' * 50)
+    # print('new_permutation: ', new_permutation)
+    # print(adjacency_matrix)
+    # print(adjacency_matrix[[0, 2, 1, 3], :])
+    # print('*' * 50)
+    #
+    # X = X[:, new_permutation]
 
     return X
