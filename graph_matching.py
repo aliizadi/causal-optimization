@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from scipy.sparse import csgraph
 from utils import hungarian_algorithm
 import cvxpy as cp
+from sklearn import linear_model
 
 seed = 0
 np.random.seed(seed)
@@ -27,7 +28,8 @@ def get_parameters():
             'frank_wolfe_convergence': 10e-10,
             'd_lambda_': 0.1,
             'path_algorithm_convergence': 10e-6,
-            'main_algorithm_convergence': 10e-6
+            'main_algorithm_convergence': 10e-6,
+            'alpha': 0.01
             }
 
 
@@ -230,11 +232,6 @@ class GraphMatching:
             P = self._path_algorithm()
         return P
 
-    def loss(self):
-        A_G = self.A_G
-        A_H = self.A_H
-        return -np.trace(self.P.T @ A_G.T @ self.P @ A_H)
-
 
 class LeastSquare:
     def __init__(self, P, train):
@@ -256,7 +253,10 @@ class LeastSquare:
                     self.left_side[i * (self.dim - 1) + j - 1, k] = self.train[k - int((j - 1) * j / 2), i]
 
     def solve(self):
-        solution, _, _, _ = np.linalg.lstsq(self.left_side, self.right_side, rcond=None)
+        # solution, _, _, _ = np.linalg.lstsq(self.left_side, self.right_side, rcond=None)
+        clf = linear_model.Lasso(alpha=parameters['alpha'])
+        clf.fit(self.left_side, self.right_side)
+        solution = clf.coef_
 
         A = np.zeros((self.dim, self.dim))
         for i in range(self.dim):
